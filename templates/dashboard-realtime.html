@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Visitor Management — Realtime</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 min-h-screen p-6">
+  <div class="max-w-4xl mx-auto bg-white p-6 rounded-2xl shadow">
+    <h1 class="text-2xl font-bold mb-4">Visitor Management — Realtime</h1>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+      <!-- Register -->
+      <div class="p-4 border rounded">
+        <h2 class="font-semibold mb-2">Register</h2>
+        <input id="regName" placeholder="Visitor name" class="w-full p-2 border rounded mb-2" />
+        <input id="regUid" placeholder="UID (auto-fill)" class="w-full p-2 border rounded mb-2 bg-gray-100" readonly />
+        <button id="regBtn" class="w-full bg-blue-600 text-white p-2 rounded">Register</button>
+        <p id="regMsg" class="text-sm mt-2 text-green-600"></p>
+      </div>
+
+      <!-- Checkin / Checkout -->
+      <div class="p-4 border rounded space-y-3">
+        <h2 class="font-semibold mb-2">Check-in / Check-out</h2>
+        <input id="uidInput" placeholder="UID (auto-fill)" class="w-full p-2 border rounded bg-gray-100" readonly />
+        <div class="flex gap-2">
+          <button id="checkinBtn" class="flex-1 bg-green-600 text-white p-2 rounded">Check In</button>
+          <button id="checkoutBtn" class="flex-1 bg-red-600 text-white p-2 rounded">Check Out</button>
+        </div>
+        <p id="actionMsg" class="text-sm mt-2 text-indigo-600"></p>
+        <div class="mt-4">
+          <button id="resetBtn" class="text-sm text-red-600">Reset visits</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Visitor table -->
+    <div>
+      <h2 class="font-semibold mb-2">Visitors (latest status)</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="p-2 text-left">ID</th>
+              <th class="p-2 text-left">Name</th>
+              <th class="p-2 text-left">Card UID</th>
+              <th class="p-2 text-left">Last Check-in</th>
+              <th class="p-2 text-left">Last Checkout</th>
+            </tr>
+          </thead>
+          <tbody id="visitorsBody" class="divide-y"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+  const API_BASE = "";
+
+  // DOM
+  const regName = document.getElementById("regName");
+  const regUid = document.getElementById("regUid");
+  const regBtn = document.getElementById("regBtn");
+  const regMsg = document.getElementById("regMsg");
+  const uidInput = document.getElementById("uidInput");
+  const checkinBtn = document.getElementById("checkinBtn");
+  const checkoutBtn = document.getElementById("checkoutBtn");
+  const actionMsg = document.getElementById("actionMsg");
+  const visitorsBody = document.getElementById("visitorsBody");
+  const resetBtn = document.getElementById("resetBtn");
+
+  // connect websocket
+  let ws;
+  function connectWS(){
+    ws = new WebSocket(WS_URL);
+    ws.onopen = () => console.log("WS connected");
+    ws.onclose = () => {
+      console.log("WS closed, reconnecting in 2s...");
+      setTimeout(connectWS, 2000);
+    };
+    ws.onerror = (e) => console.error("WS error", e);
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        // handle types
+        if (msg.type === "card_present") {
+          const uid = msg.uid;
+          regUid.value = uid;
+          uidInput.value = uid;
+          // optionally show small toast
+        } else if (["register","checkin","checkout","reset_visits"].includes(msg.type)) {
+          // update tables when data changes
+          loadVisitors();
+          // optional messages
+          if (msg.type === "register") regMsg.innerText = "Registered: " + msg.visitor.name;
+          if (msg.type === "checkin") actionMsg.innerText = "Check-in: " + (msg.visit?.name || "");
+          if (msg.type === "checkout") actionMsg.innerText = "Check-out: " + (msg.name || "");
+          if (msg.type === "reset_visits") actionMsg.innerText = "All visits reset";
+        }
+      } catch(e){
+        console.error("WS parse error", e);
+      }
+    };
+  }
+  connectWS();
+
+  // fetch last uid (fallback)
+  async function fetchLastUid(){
+    try {
+      const res = await fetch("/last_uid");
+      const j = await res.json();
+      const uid = j.uid;
+      if (uid) {
+        regUid.value = uid;
+        uidInput.value = uid;
+      }
+    } catch(e){ console.error(e); }
+  }
+
+  async function loadVisitors(){
+    try {
+      const res = await fetch("/visitors");
+      const data = await res.json();
+      visitorsBody.innerHTML = "";
+      data.forEach(v => {
+        visitorsBody.innerHTML += `
+          <tr>
+            <td class="p-2">${v.id}</td>
+            <td class="p-2">${escapeHtml(v.name)}</td>
+            <td class="p-2 font-mono">${escapeHtml(v.card_uid)}</td>
+            <td class="p-2">${v.checkin_time || "-"}</td>
+            <td class="p-2">${v.checkout_time || "-"}</td>
+          </tr>
+        `;
+      });
+    } catch(e) { console.error(e); }
+  }
+
+  function escapeHtml(s){ if(!s) return ""; return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); }
+
+  // Register via AJAX (JSON)
+  regBtn.addEventListener("click", async () => {
+    const name = regName.value.trim();
+    const uid = regUid.value.trim();
+    if (!name) { regMsg.innerText = "Name required"; return; }
+    if (!uid) { regMsg.innerText = "No card detected"; return; }
+
+    try {
+      const res = await fetch("/register", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ name })
+      });
+      const j = await res.json();
+      if (res.ok) {
+        regMsg.innerText = j.message || "Registered";
+        regName.value = "";
+        regUid.value = "";
+        uidInput.value = "";
+        loadVisitors();
+      } else {
+        regMsg.innerText = j.error || "Error";
+      }
+    } catch(e) { regMsg.innerText = "Network error"; console.error(e); }
+  });
+
+  // Check-in
+  checkinBtn.addEventListener("click", async () => {
+    try {
+      const res = await fetch("/checkin", { method: "POST" });
+      const j = await res.json();
+      actionMsg.innerText = j.message || j.error;
+      loadVisitors();
+      regUid.value = "";
+      uidInput.value = "";
+    } catch(e) { actionMsg.innerText = "Network error"; console.error(e); }
+  });
+
+  // Checkout (send uid)
+  checkoutBtn.addEventListener("click", async () => {
+    const uid = uidInput.value.trim();
+    if (!uid) { actionMsg.innerText = "No card detected"; return; }
+    try {
+      const res = await fetch("/checkout", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ uid })
+      });
+      const j = await res.json();
+      actionMsg.innerText = j.message || j.error;
+      loadVisitors();
+      regUid.value = "";
+      uidInput.value = "";
+    } catch(e) { actionMsg.innerText = "Network error"; console.error(e); }
+  });
+
+  // Reset visits (admin)
+  resetBtn.addEventListener("click", async () => {
+    if (!confirm("Reset all visits?")) return;
+    try {
+      const res = await fetch("/reset_visits", { method: "POST" });
+      const j = await res.json();
+      actionMsg.innerText = j.message || j.error;
+      loadVisitors();
+    } catch(e) { actionMsg.innerText = "Network error"; console.error(e); }
+  });
+
+  // init
+  fetchLastUid();
+  loadVisitors();
+
+  // periodic fallback updates (in case websocket missed)
+  setInterval(fetchLastUid, 5000);
+  setInterval(loadVisitors, 8000);
+</script>
+</body>
+</html>

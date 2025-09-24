@@ -1,0 +1,4 @@
+pyinstaller
+PyQt5
+uvicorn 
+fastapi

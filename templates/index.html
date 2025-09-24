@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Visitor Management System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+  <div class="max-w-4xl mx-auto bg-white shadow-lg rounded-xl p-6">
+    <h1 class="text-2xl font-bold mb-4">Visitor Management System</h1>
+
+    <!-- Register Visitor -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold mb-2">Register Visitor</h2>
+      <form id="registerForm" class="space-y-3">
+        <div>
+          <label class="block text-sm font-medium">Name</label>
+          <input type="text" name="name" id="name" class="w-full border rounded px-3 py-2" required />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Card UID</label>
+          <input type="text" id="uid" name="card_uid" class="w-full border rounded px-3 py-2 bg-gray-100" readonly />
+        </div>
+        <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">Register</button>
+      </form>
+      <p id="registerMsg" class="text-sm mt-2"></p>
+    </div>
+
+    <!-- Checkin / Checkout -->
+    <div class="flex space-x-4 mb-6">
+      <button id="checkinBtn" class="bg-green-500 text-white px-4 py-2 rounded">Check In</button>
+      <button id="checkoutBtn" class="bg-red-500 text-white px-4 py-2 rounded">Check Out</button>
+    </div>
+    <p id="actionMsg" class="text-sm mb-6"></p>
+
+    <!-- Visitor Logs -->
+    <div>
+      <h2 class="text-xl font-semibold mb-2">Visitor Logs</h2>
+      <table class="w-full border border-gray-300 text-sm">
+        <thead class="bg-gray-200">
+          <tr>
+            <th class="border px-2 py-1">ID</th>
+            <th class="border px-2 py-1">Name</th>
+            <th class="border px-2 py-1">Card UID</th>
+            <th class="border px-2 py-1">Checkin</th>
+            <th class="border px-2 py-1">Checkout</th>
+          </tr>
+        </thead>
+        <tbody id="logsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function fetchUID() {
+      const res = await fetch("/last_uid");
+      const data = await res.json();
+      document.getElementById("uid").value = data.uid || "";
+    }
+
+    async function fetchLogs() {
+      const res = await fetch("/visitors");
+      const data = await res.json();
+      const tbody = document.getElementById("logsBody");
+      tbody.innerHTML = "";
+      data.forEach(v => {
+        tbody.innerHTML += `
+          <tr>
+            <td class="border px-2 py-1">${v.id}</td>
+            <td class="border px-2 py-1">${v.name}</td>
+            <td class="border px-2 py-1">${v.card_uid}</td>
+            <td class="border px-2 py-1">${v.checkin_time || ""}</td>
+            <td class="border px-2 py-1">${v.checkout_time || ""}</td>
+          </tr>
+        `;
+      });
+    }
+
+    // Register Visitor
+    document.getElementById("registerForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const res = await fetch("/register", { method: "POST", body: formData });
+      const msg = await res.json();
+      document.getElementById("registerMsg").innerText = msg.message || msg.error;
+      fetchLogs();
+      fetchUID();
+    });
+
+    // Checkin
+    document.getElementById("checkinBtn").addEventListener("click", async () => {
+      const res = await fetch("/checkin", { method: "POST" });
+      const msg = await res.json();
+      document.getElementById("actionMsg").innerText = msg.message || msg.error;
+      fetchLogs();
+      fetchUID();
+    });
+
+    // Checkout
+    document.getElementById("checkoutBtn").addEventListener("click", async () => {
+      const uid = document.getElementById("uid").value;
+      const res = await fetch("/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid })
+      });
+      const msg = await res.json();
+      document.getElementById("actionMsg").innerText = msg.message || msg.error;
+      fetchLogs();
+      fetchUID();
+    });
+
+    // Refresh UID & Logs setiap 5 detik
+    setInterval(fetchUID, 5000);
+    setInterval(fetchLogs, 5000);
+
+    fetchUID();
+    fetchLogs();
+  </script>
+</body>
+</html>
